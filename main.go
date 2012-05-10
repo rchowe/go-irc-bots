@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"time"
 )
 
 type User struct {
@@ -41,7 +42,7 @@ func die( message string ) {
 
 func main() {
 
-	debug := true
+	debug := false
 
 	// Regexes
 	privmsgRegexp := regexp.MustCompile( "^:(.+?)!(.+?)@(.+?)\\sPRIVMSG\\s(.+?)\\s:(.+)$" )
@@ -55,6 +56,25 @@ func main() {
 	host    := os.Args[1]
 	nick    := os.Args[2]
 	channels := os.Args[3:len(os.Args)]
+	
+	// Add the nick channel if it's not in there already
+	// IMO too much work for this one thing
+	found := false
+	for i := range channels {
+		if channels[i] == nick {
+			found = true
+			break
+		}
+	}
+	
+	if found == false {
+		old, channels := channels, make( []string, len( channels ) + 1 )
+		for i := range old {
+			channels[i] = old[i]
+		}
+		
+		channels[len(channels)-1] = nick
+	}
 	
 	if host == "" || nick == "" {
 		usage()
@@ -127,7 +147,14 @@ func main() {
 	}
 	
 	// To make foonetic admins happy
-	write <- "MODE +Bix carbon"
+	write <- "MODE +Bix " + nick
+	
+	privmsg := func( str string, channel string ) {
+		write <- "PRIVMSG " + channel + " :" + str
+		if channel != nick {
+			fmt.Printf( "[\033[34m%s\033[0m] \033[32;4;1m%s\033[0m: %s\n", channel, nick, str )
+		}
+	}
 	
 	for {
 		str := <- read
@@ -151,9 +178,26 @@ func main() {
 			if message.Action {
 				fmt.Printf( "[\033[34m%s\033[0m] ** \033[4;1m%s\033[0m \033[1m%s\033[0m **\n", message.Channel, message.User.Nick, message.Content )
 			} else if message.Content == "\001VERSION\001" {
-				write <- "carbon v1.0"
+				write <- nick + " v1.0"
 			} else {
 				fmt.Printf( "[\033[34m%s\033[0m] \033[4;1m%s\033[0m: %s\n", message.Channel, message.User.Nick, message.Content )
+				
+				// Check if we're being addressed
+				if len(message.Content) > len( nick ) + 2 && (message.Content[0:len(nick)+2] == nick + ", " || message.Content[0:len(nick)+2] == nick + ": ") {
+					if message.Content[len(nick)+2:len(message.Content)] == "hello" {
+						privmsg( "Hello, " + message.User.Nick, message.Channel )
+					}
+					
+					if message.Content[len(nick)+2:len(message.Content)] == "!quit" {
+						write <- "QUIT :Bye!"
+						time.Sleep( 2 )
+						os.Exit(1)
+					}
+				}
+				
+				if message.Content == "botsnack" {
+					privmsg( "<3", message.Channel )
+				}
 			}
 		}
 		
